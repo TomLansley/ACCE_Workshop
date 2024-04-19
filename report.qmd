@@ -1,0 +1,222 @@
+---
+title: "Analysis of NEON woody plant vegetation structure data"
+subtitle: "ACCE DTP workshop"
+author: "Tom Lansley"
+date: "2024-04-17"
+format: 
+  html:
+    toc: true
+    theme: paper
+    highlight-style: dracula
+    df-print: paged
+editor: visual
+bibliography: data-raw/wood-survey-data-master/references.bib
+---
+
+## Background
+
+![](data-raw/wood-survey-data-master/neon-logo.png){width="200"}
+
+The [NEON Woody plant vegetation structure dataset](https://data.neonscience.org/data-products/DP1.10098.001) [@DP1.10098.001/provisional] contains **structure measurements, including height, canopy diameter, and stem diameter, as well as mapped position of individual woody plants across the survey area.**
+
+This data product contains the quality-controlled, native sampling resolution data from in-situ measurements of live and standing dead woody individuals and shrub groups, from all terrestrial NEON sites with qualifying woody vegetation. With some modifications, this protocol adopts guidelines established by the @forestry2012 for measuring tree species. The exact measurements collected per individual depend on growth form, and these measurements are focused on enabling biomass and productivity estimation, estimation of shrub volume and biomass, and calibration / validation of multiple NEON airborne remote-sensing data products.
+
+Our analyses focus on the **relationship between individual stem height and diameter** and how that relationship **varies across growth forms**.
+
+### Data Preparation
+
+Data was prepared for analysis by:
+
+-   Compiling all individual raw data files into a single table.
+-   Merging individual data with plot level data and geolocating individuals.
+
+The data preparation steps are contained in the `data-raw/individuals.R` script.
+
+## Summary statistics
+
+Prepared data were also subset to columns of interest: `stem_diameter`, `height` and `growth_form`. Records were removed where `growth_form` values were `"liana"` or missing.
+
+```{r}
+#| label: setup
+#| code-fold: true 
+#| message: false
+## Set up ----
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(here)
+
+#Load data
+individual <- read_csv(
+  here("data", "individual.csv")) %>% 
+  select(stem_diameter, height, growth_form)
+
+#Subset data
+analysis_df <- individual %>% 
+  filter(complete.cases(.), #only complete data (no NAs) for all the data
+         growth_form != "liana")  #remove the liana rows
+
+#Order growth form levels
+gf_levels <- table(analysis_df$growth_form) %>% 
+  sort() %>% #sorts default lowest to highest
+  names() #just extract the names
+
+analysis_df <- analysis_df %>% 
+  mutate(growth_form = factor(growth_form, levels = gf_levels)) #make factor with specified levels
+
+
+```
+
+The final data set contains a total of `{r} nrow(analysis_df)` rows.
+
+```{r}
+#| echo: false
+#| label: tbl-print
+analysis_df
+```
+
+```{r}
+#| echo: false
+#| label: fig-growth-form-counts
+#| fig-cap: "Distribution of individual counts across growth forms."
+
+analysis_df %>% 
+  ggplot(aes(y = growth_form, fill = growth_form, colour = growth_form))+
+  geom_bar(alpha = 0.5, show.legend = FALSE)
+```
+
+@fig-growth-form-counts shows the distribution of individual counts across growth forms.
+
+```{r}
+#| echo: false
+#| label: fig-violin-plots
+#| fig-cap: "Height and stem diameter of growth forms"
+
+analysis_df %>% 
+  tidyr::pivot_longer(
+    cols = c(stem_diameter, height),
+    names_to = "var",
+    values_to = "value"
+  ) %>% #now pipe through to plot
+  ggplot(aes(x = log(value), y = growth_form, 
+             colour = growth_form, fill = growth_form))+
+  geom_violin(alpha = 0.5, trim = TRUE, show.legend = FALSE) +
+  geom_boxplot(alpha = 0.5, show.legend = FALSE)+
+  facet_grid(~var) #one plot for each variable type
+```
+
+@fig-violin-plots shows the height and stem diameter of growth forms.
+
+# Analysis
+
+### Modelling overall `stem_diameter` as a function of `height`
+
+Initially we fit a linear model of form `log(stem_diameter)` as a function of `log(height)`.
+
+```{r}
+lm_overall <- lm(log(stem_diameter) ~ log(height), 
+                 data = analysis_df)
+```
+
+```{r}
+#| echo: false
+#| tbl-cap: "Overall model evaluation"
+#| label: tbl-overall-glance
+
+library(gt)
+lm_overall %>% 
+  broom::glance() %>% 
+  gt() %>% #good table
+  fmt_number(decimals = 2) #format numbers e.g. limit to 2 decimals
+```
+
+```{r}
+#| echo: false
+#| tbl-cap: "Overall model coefficients"
+#| label: tbl-overall-tidy
+
+lm_overall %>% 
+  broom::tidy() %>% 
+  gt() %>% 
+  fmt_number(decimals = 4) %>% 
+  tab_style_body( #change style of certain elements of the table
+    columns = "p.value",
+    style = cell_text(weight = "bold"),
+    fn = function(x) {x <0.05} #significant p values will be bold
+  ) 
+```
+
+```{r}
+#| echo: false
+#| fig-cap: "Relationship between stem diameter and height."
+#| label: fig-overall-lm
+
+analysis_df %>% 
+  ggplot(aes(x = log(height), y = log(stem_diameter)))+
+  geom_point(alpha = 0.2)+
+  geom_smooth(method = "lm")+
+  xlab("Log of height (m)") +
+  ylab("Log of stem diameter (cm)")+
+  theme_linedraw()
+```
+
+See @fig-overall-lm, @tbl-overall-glance and @tbl-overall-tidy for results.
+
+### Modelling `stem_diameter` as a function of `height`, with `growth_form` as an interaction
+
+We also fit a model with growth form as an interaction.
+
+```{r}
+lm_growth <- lm(log(stem_diameter) ~ log(height) * growth_form, 
+                data = analysis_df)
+
+```
+
+```{r}
+#| echo: false
+#| tbl-cap: "Interaction model evaluation"
+#| label: tbl-interaction-glance
+
+library(gt)
+lm_growth %>% 
+  broom::glance() %>% 
+  gt() %>% #good table
+  fmt_number(decimals = 2) #format numbers e.g. limit to 2 decimals
+```
+
+```{r}
+#| echo: false
+#| tbl-cap: "Interaction model coefficients"
+#| label: tbl-interaction-tidy
+
+lm_growth %>% 
+  broom::tidy() %>% 
+  gt() %>% 
+  fmt_number(decimals = 4) %>% 
+  tab_style_body( #change style of certain elements of the table
+    columns = "p.value",
+    style = cell_text(weight = "bold"),
+    fn = function(x) {x <0.05} #significant p values will be bold
+  ) 
+```
+
+```{r}
+#| echo: false
+#| fig-cap: "Relationship between stem diameter and height with growth form as an interaction."
+#| label: fig-interaction-lm
+
+analysis_df %>% 
+  ggplot(aes(x = log(height), y = log(stem_diameter),
+             colour = growth_form))+
+  geom_point(alpha = 0.1)+
+  geom_smooth(method = "lm")+
+  labs(x = "Log of height (m)", y = "Log of stem diameter (cm)",
+       colour = "Growth form")+
+  theme_linedraw()
+```
+
+See @fig-interaction-lm, @tbl-interaction-glance and @tbl-interaction-tidy for results.
+
+## Summary
+
+Our results agree with findings in the literature [@Haase; @THORNLEY1999195; @CANNELL1984299]
