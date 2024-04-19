@@ -9,3 +9,13 @@ The goal of this project is to analyse the relationship between stem diameter an
 A report of our analysis can be found [here](report.html)
 
 Details about the data used can be found [here](data/index.html)
+
+## Installation 
+
+This project manages dependencies through `renv`. To restore dependencies, use: 
+
+```{r}
+#install.packages("renv")
+renv::restore()
+```
+
